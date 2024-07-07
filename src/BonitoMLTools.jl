@@ -1,5 +1,10 @@
 module BonitoMLTools
 
-# Write your package code here.
+using OpenAI
+using Bonito
+using Markdown
+
+include("openai.jl")
+include("widgets.jl")
 
 end
