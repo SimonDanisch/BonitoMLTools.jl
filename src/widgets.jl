@@ -54,8 +54,8 @@ struct JLEvalEditor
     source::String
 end
 
-function Bonito.jsrender(s::Session, editor::JLEvalEditor)
-    editor = CodeEditor("julia"; initial_source=editor.source, height="400")
+function Bonito.jsrender(s::Session, _editor::JLEvalEditor)
+    editor = CodeEditor("julia"; initial_source=_editor.source, height="400")
     eval_button = Button("eval")
     output = Observable(DOM.div())
     editor_module = Base.Module(gensym("EditorModule"))
@@ -69,7 +69,23 @@ function Bonito.jsrender(s::Session, editor::JLEvalEditor)
         end
         output[] = DOM.div(result)
     end
-    return Bonito.jsrender(s, DOM.div(editor, eval_button, output, style="width: 90ch"))
+    resize_js = js"""
+    function resize_editor(element){
+        const editor = element.env.editor;
+        function resizeEditor() {
+            const lines = editor.session.getLength();
+            const lineHeight = 20; // Approximate height of a line
+            const padding = 10; // Extra padding
+            const newHeight = lines * lineHeight + padding;
+            element.style.height = newHeight + "px";
+            editor.resize(); // Notify Ace Editor to resize
+        }
+        editor.session.on('change', resizeEditor);
+    }
+    """
+    Bonito.onload(s, editor.element, resize_js)
+    html = DOM.div(editor, eval_button, output; style="width: 90ch")
+    return Bonito.jsrender(s, Bonito.Card(html))
 end
 
 struct InteractiveMarkdown
@@ -80,16 +96,14 @@ function Bonito.jsrender(session::Session, imd::InteractiveMarkdown)
     markdown = Markdown.parse(imd.source)
     style = Styles("overflow-x" => "hidden")
     replacements = Dict(
-        Markdown.Code => (session, node) -> begin
+        Markdown.Code => (node) -> begin
             DOM.div(JLEvalEditor(node.code), width="90ch", style=style)
         end
     )
-    md = Bonito.replace_expressions(session, markdown, replacements)
-    js = js"{
-        const div = document.getElementById('output')
-        div.scrollTop = div.scrollHeight;
-    }"
-    return Bonito.jsrender(session, DOM.div(md, js))
+    runner = Bonito.ModuleRunner(Module())
+    md = Bonito.replace_expressions(markdown, replacements, runner)
+
+    return Bonito.jsrender(session, DOM.div(md))
 end
 
 struct TextInput
@@ -109,7 +123,7 @@ function Bonito.jsrender(s::Session, tf::TextInput)
     name = tf.text.attributes[:id]
     enter_js = js"""
     const ta_div = document.getElementById($(name))
-    ta_div.addEventListener("keydown", function(e) {
+    ta_div.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
             $(tf.value).notify(ta_div.value)
             console.log("Enter pressed")
